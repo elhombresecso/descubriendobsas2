@@ -1,0 +1,13 @@
+{
+  "background_color": "#121212",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "descubriendo Buenos Aires",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "descubriendo Bs As",
+  "start_url": "/",
+  "theme_color": "#121212",
+  "description": "Juego de exploración urbana y niebla de guerra en CABA.",
+  "id": "com.nicocrak.bafogofwar"
+}

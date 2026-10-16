@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Descubriendo Buenos Aires - Fog of War</title>
+  
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#121212">
+
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.css" rel="stylesheet" />
+  <style>
+    body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #000; overflow: hidden; color: #fff; }
+    #map { height: 100%; width: 100%; position: absolute; top: 0; left: 0; }
+
+    /* Pop-up Flotante / Banner Toast de Logro */
+    #toast-notification {
+      position: absolute; top: 20px; left: 50%; transform: translateX(-50%) translateY(-100px);
+      background: rgba(20, 20, 20, 0.95); backdrop-filter: blur(15px);
+      border: 1px solid #FF3366; border-radius: 16px; padding: 12px 18px;
+      display: flex; align-items: center; gap: 12px; z-index: 100;
+      box-shadow: 0 8px 25px rgba(255, 51, 102, 0.35); color: #fff;
+      transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      max-width: 85%; width: max-content;
+    }
+    #toast-notification.active { transform: translateX(-50%) translateY(0); }
+    .toast-icon { font-size: 26px; }
+    .toast-title { font-size: 13px; font-weight: 800; color: #FF3366; text-transform: uppercase; letter-spacing: 0.5px; }
+    .toast-desc { font-size: 12px; font-weight: 600; color: #eee; }
+
+    /* HUD Superior: Porcentaje explorado */
+    #hud-top {
+      position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
+      background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(10px); color: #fff;
+      padding: 8px 18px; border-radius: 25px; font-weight: 600; font-size: 13px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4); z-index: 10; border: 1px solid rgba(255,255,255,0.15);
+      letter-spacing: 0.3px; cursor: pointer; transition: transform 0.2s, background 0.2s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    #hud-top:active { transform: translateX(-50%) scale(0.95); background: rgba(35, 35, 35, 0.95); }
+
+    /* Botón flotante de GPS lateral */
+    #gps-btn {
+      position: absolute; right: 20px; bottom: 100px; background: rgba(20, 20, 20, 0.85);
+      backdrop-filter: blur(10px); color: white; border: 1px solid rgba(255,255,255,0.15);
+      width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.4); z-index: 10; font-size: 20px;
+    }
+
+    /* Modales Flotantes Generales */
+    .modal-screen {
+      position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 75px);
+      background: rgba(12, 12, 12, 0.95); backdrop-filter: blur(20px);
+      z-index: 20; display: none; flex-direction: column; padding: 45px 16px 20px 16px;
+      box-sizing: border-box; overflow-y: auto;
+    }
+    .modal-screen.active { display: flex; }
+
+    .close-btn {
+      position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,0.1);
+      border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%;
+      font-weight: bold; cursor: pointer; font-size: 16px;
+    }
+
+    .screen-title { font-size: 22px; font-weight: 800; margin-bottom: 4px; color: #fff; }
+    .screen-subtitle { font-size: 12px; color: #888; margin-bottom: 12px; }
+
+    /* Buscador interno */
+    .search-input {
+      width: 100%; padding: 10px 14px; background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; color: #fff;
+      font-size: 13px; margin-bottom: 12px; box-sizing: border-box; outline: none; flex-shrink: 0;
+    }
+    .search-input::placeholder { color: #888; }
+
+    /* Sub-pestañas principales de Logros */
+    .achievement-tabs {
+      display: flex; background: rgba(255,255,255,0.06); border-radius: 12px; padding: 3px; margin-bottom: 12px; gap: 4px; flex-shrink: 0;
+    }
+    .ach-tab {
+      flex: 1; text-align: center; padding: 8px 4px; font-size: 11px; font-weight: 700; color: #888; cursor: pointer; border-radius: 9px; transition: all 0.2s;
+    }
+    .ach-tab.active { background: #FF3366; color: #fff; }
+
+    /* Filtros secundarios de Categorías */
+    .filter-chips { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 8px 0; margin-bottom: 8px; scrollbar-width: none; flex-shrink: 0; }
+    .filter-chips::-webkit-scrollbar { display: none; }
+    .chip {
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+      padding: 5px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; color: #aaa; transition: all 0.2s;
+    }
+    .chip.active { background: rgba(255,51,102,0.3); color: #FF3366; border-color: #FF3366; }
+
+    /* Tarjetas de Resumen */
+    .summary-card {
+      background: linear-gradient(135deg, rgba(255,51,102,0.2) 0%, rgba(30,30,30,0.8) 100%);
+      border: 1px solid rgba(255,51,102,0.4); border-radius: 16px; padding: 14px;
+      margin-bottom: 14px; display: flex; justify-content: space-around; text-align: center; flex-shrink: 0;
+    }
+    .stat-box h3 { margin: 0; font-size: 18px; color: #FF3366; }
+    .stat-box p { margin: 3px 0 0 0; font-size: 10px; color: #aaa; text-transform: uppercase; font-weight: 600; }
+
+    /* Listas de Ítems */
+    .section-header { font-size: 14px; font-weight: 700; margin: 10px 0 8px 0; color: #ddd; }
+    .item-card {
+      background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px; padding: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px;
+    }
+    .card-icon {
+      width: 40px; height: 40px; border-radius: 10px; background: rgba(255, 255, 255, 0.1);
+      display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+    }
+    .card-icon.unlocked { background: rgba(255,51,102,0.2); border: 1px solid #FF3366; }
+    .card-info { flex-grow: 1; }
+    .card-title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+    .card-desc { font-size: 11px; color: #888; margin-bottom: 6px; line-height: 1.3; }
+    
+    /* Barras de Progreso */
+    .progress-bar-bg { width: 100%; height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; background: #FF3366; transition: width 0.3s; }
+
+    /* HUD Inferior */
+    #hud-bottom {
+      position: absolute; bottom: 0; left: 0; width: 100%; height: 75px;
+      background: rgba(15, 15, 15, 0.95); backdrop-filter: blur(15px);
+      border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-around;
+      align-items: center; z-index: 30; padding-bottom: env(safe-area-inset-bottom);
+    }
+    .nav-item {
+      display: flex; flex-direction: column; align-items: center; color: #888;
+      font-size: 10px; font-weight: 500; cursor: pointer; gap: 4px; transition: color 0.2s;
+    }
+    .nav-item svg { width: 24px; height: 24px; fill: currentColor; }
+    .nav-item.active { color: #FF3366; }
+  </style>
+</head>
+<body>
+  <!-- Banner Notificación Toast -->
+  <div id="toast-notification">
+    <div class="toast-icon">🏆</div>
+    <div>
+      <div class="toast-title">¡Logro Desbloqueado!</div>
+      <div class="toast-desc" id="toast-text">Nombre del logro</div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <div id="hud-top" onclick="abrirBarrios()">
+    <span id="explore-text">explorado 0.0%</span> 📊
+  </div>
+
+  <button id="gps-btn" onclick="centrarEnUsuario()" title="Centrar GPS">🎯</button>
+
+  <div id="barrios-screen" class="modal-screen">
+    <button class="close-btn" onclick="cerrarBarrios()">✕</button>
+    <div class="screen-title">Los 48 Barrios 🏙️</div>
+    <div class="screen-subtitle">Explorá cada metro cuadrado para dominar el 100% de la zona.</div>
+
+    <div class="summary-card">
+      <div class="stat-box">
+        <h3 id="stat-barrios-visitados">0 / 48</h3>
+        <p>Barrios Visitados</p>
+      </div>
+      <div class="stat-box">
+        <h3 id="stat-total-percent">0.0%</h3>
+        <p>Total CABA</p>
+      </div>
+    </div>
+
+    <input type="text" class="search-input" id="input-buscar-barrio" placeholder="Buscar barrio..." oninput="filtrarBarrios()">
+    <div class="section-header">Listado Oficial</div>
+    <div id="lista-barrios-container"></div>
+  </div>
+
+  <div id="logros-screen" class="modal-screen">
+    <div class="screen-title">Logros & Desafíos 🏆</div>
+    <div class="screen-subtitle">Desbloqueá las insignias más picantes de Buenos Aires.</div>
+
+    <div class="summary-card">
+      <div class="stat-box">
+        <h3 id="stat-logros-completados">0 / 44</h3>
+        <p>Desbloqueados</p>
+      </div>
+      <div class="stat-box">
+        <h3 id="stat-total-xp">0 XP</h3>
+        <p>Puntos Totales</p>
+      </div>
+    </div>
+
+    <div class="achievement-tabs">
+      <div id="tab-general" class="ach-tab active" onclick="cambiarVistaLogros('general')">Generales</div>
+      <div id="tab-comunas" class="ach-tab" onclick="cambiarVistaLogros('comunas')">Comunas</div>
+      <div id="tab-completados" class="ach-tab" onclick="cambiarVistaLogros('completados')">Completados</div>
+    </div>
+
+    <div id="filtro-chips-container" class="filter-chips">
+      <div class="chip active" onclick="filtrarCategoria('todos', this)">Todos</div>
+      <div class="chip" onclick="filtrarCategoria('cultura', this)">Cultura & Barrios</div>
+      <div class="chip" onclick="filtrarCategoria('lugares', this)">Lugares</div>
+      <div class="chip" onclick="filtrarCategoria('movimiento', this)">Movimiento</div>
+    </div>
+
+    <input type="text" class="search-input" id="input-buscar-logro" placeholder="Buscar logro..." oninput="renderizarLogros()">
+
+    <div id="lista-logros-container"></div>
+  </div>
+
+  <div id="hud-bottom">
+    <div class="nav-item" onclick="cambiarPestana('amigos')">
+      <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+      Amigos
+    </div>
+    <div class="nav-item active" onclick="cambiarPestana('mapa')">
+      <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+      Mapa
+    </div>
+    <div class="nav-item" onclick="cambiarPestana('logros')">
+      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+      Logros
+    </div>
+  </div>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1Ijoibmljb2NyYWtjMjQwIiwiYSI6ImNtdXhqMnVrZTA4cjAyeW91MWU0YTIxczMifQ.fVz7VGxIVYTnaeei6C52gw';
+
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: [-58.3816, -34.6037],
+      zoom: 15
+    });
+
+    const RADIUS_METERS = 100;
+    const FOG_SOURCE_ID = 'fog-source';
+    const FOG_LAYER_ID = 'fog-layer';
+    
+    let userMarker = null;
+    let exploredPolygon = null;
+    let lastUserCoords = null;
+    const TARGET_AREA_M2 = 200000000;
+    
+    let vistaActualLogros = 'general';
+    let categoriaActiva = 'todos';
+
+    const barriosCABA = [
+      { nombre: "Agronomía", coords: [-58.4900, -34.5880], areaM2Total: 2100000, porcentaje: 0 },
+      { nombre: "Almagro", coords: [-58.4230, -34.6110], areaM2Total: 4000000, porcentaje: 0 },
+      { nombre: "Balvanera", coords: [-58.4030, -34.6080], areaM2Total: 4300000, porcentaje: 0 },
+      { nombre: "Barracas", coords: [-58.3750, -34.6430], areaM2Total: 7500000, porcentaje: 0 },
+      { nombre: "Belgrano", coords: [-58.4550, -34.5620], areaM2Total: 6800000, porcentaje: 0 },
+      { nombre: "Boedo", coords: [-58.4210, -34.6230], areaM2Total: 2600000, porcentaje: 0 },
+      { nombre: "Caballito", coords: [-58.4430, -34.6170], areaM2Total: 6800000, porcentaje: 0 },
+      { nombre: "Chacarita", coords: [-58.4510, -34.5880], areaM2Total: 3100000, porcentaje: 0 },
+      { nombre: "Coghlan", coords: [-58.4790, -34.5610], areaM2Total: 1300000, porcentaje: 0 },
+      { nombre: "Colegiales", coords: [-58.4480, -34.5730], areaM2Total: 2300000, porcentaje: 0 },
+      { nombre: "Constitución", coords: [-58.3830, -34.6270], areaM2Total: 1800000, porcentaje: 0 },
+      { nombre: "Flores", coords: [-58.4630, -34.6320], areaM2Total: 8600000, porcentaje: 0 },
+      { nombre: "Floresta", coords: [-58.4850, -34.6320], areaM2Total: 2300000, porcentaje: 0 },
+      { nombre: "La Boca", coords: [-58.3610, -34.6350], areaM2Total: 3300000, porcentaje: 0 },
+      { nombre: "La Paternal", coords: [-58.4700, -34.5980], areaM2Total: 2200000, porcentaje: 0 },
+      { nombre: "Liniers", coords: [-58.5300, -34.6430], areaM2Total: 5400000, porcentaje: 0 },
+      { nombre: "Mataderos", coords: [-58.5080, -34.6590], areaM2Total: 7400000, porcentaje: 0 },
+      { nombre: "Monserrat", coords: [-58.3810, -34.6110], areaM2Total: 2200000, porcentaje: 0 },
+      { nombre: "Monte Castro", coords: [-58.5120, -34.6200], areaM2Total: 2600000, porcentaje: 0 },
+      { nombre: "Nueva Pompeya", coords: [-58.4110, -34.6490], areaM2Total: 6100000, porcentaje: 0 },
+      { nombre: "Núñez", coords: [-58.4650, -34.5450], areaM2Total: 4500000, porcentaje: 0 },
+      { nombre: "Palermo", coords: [-58.4200, -34.5810], areaM2Total: 15800000, porcentaje: 0 },
+      { nombre: "Parque Avellaneda", coords: [-58.4790, -34.6490], areaM2Total: 5100000, porcentaje: 0 },
+      { nombre: "Parque Chacabuco", coords: [-58.4430, -34.6350], areaM2Total: 2400000, porcentaje: 0 },
+      { nombre: "Parque Chas", coords: [-58.4830, -34.5830], areaM2Total: 1400000, porcentaje: 0 },
+      { nombre: "Parque Patricios", coords: [-58.3970, -34.6350], areaM2Total: 3900000, porcentaje: 0 },
+      { nombre: "Puerto Madero", coords: [-58.3630, -34.6110], areaM2Total: 5000000, porcentaje: 0 },
+      { nombre: "Recoleta", coords: [-58.3910, -34.5880], areaM2Total: 5900000, porcentaje: 0 },
+      { nombre: "Retiro", coords: [-58.3750, -34.5920], areaM2Total: 3400000, porcentaje: 0 },
+      { nombre: "Saavedra", coords: [-58.4850, -34.5510], areaM2Total: 5600000, porcentaje: 0 },
+      { nombre: "San Cristóbal", coords: [-58.4030, -34.6230], areaM2Total: 2100000, porcentaje: 0 },
+      { nombre: "San Nicolás", coords: [-58.3830, -34.6010], areaM2Total: 2300000, porcentaje: 0 },
+      { nombre: "San Telmo", coords: [-58.3710, -34.6210], areaM2Total: 1200000, porcentaje: 0 },
+      { nombre: "Vélez Sarsfield", coords: [-58.5030, -34.6320], areaM2Total: 2100000, porcentaje: 0 },
+      { nombre: "Versailles", coords: [-58.5250, -34.6200], areaM2Total: 1400000, porcentaje: 0 },
+      { nombre: "Villa Crespo", coords: [-58.4350, -34.5980], areaM2Total: 3600000, porcentaje: 0 },
+      { nombre: "Villa del Parque", coords: [-58.4900, -34.6050], areaM2Total: 3600000, porcentaje: 0 },
+      { nombre: "Villa Devoto", coords: [-58.5120, -34.5920], areaM2Total: 6600000, porcentaje: 0 },
+      { nombre: "Villa General Mitre", coords: [-58.4680, -34.6110], areaM2Total: 2200000, porcentaje: 0 },
+      { nombre: "Villa Lugano", coords: [-58.4680, -34.6720], areaM2Total: 9100000, porcentaje: 0 },
+      { nombre: "Villa Luro", coords: [-58.5030, -34.6410], areaM2Total: 2600000, porcentaje: 0 },
+      { nombre: "Villa Ortúzar", coords: [-58.4680, -34.5830], areaM2Total: 1200000, porcentaje: 0 },
+      { nombre: "Villa Pueyrredón", coords: [-58.5030, -34.5750], areaM2Total: 3300000, porcentaje: 0 },
+      { nombre: "Villa Real", coords: [-58.5250, -34.6310], areaM2Total: 1300000, porcentaje: 0 },
+      { nombre: "Villa Riachuelo", coords: [-58.4680, -34.6850], areaM2Total: 4200000, porcentaje: 0 },
+      { nombre: "Villa Santa Rita", coords: [-58.4800, -34.6150], areaM2Total: 2200000, porcentaje: 0 },
+      { nombre: "Villa Soldati", coords: [-58.4430, -34.6650], areaM2Total: 8700000, porcentaje: 0 },
+      { nombre: "Villa Urquiza", coords: [-58.4850, -34.5710], areaM2Total: 5400000, porcentaje: 0 }
+    ];
+
+    const comunasDef = {
+      "Comuna 1": ["Retiro", "San Nicolás", "Puerto Madero", "San Telmo", "Monserrat", "Constitución"],
+      "Comuna 2": ["Recoleta"],
+      "Comuna 3": ["Balvanera", "San Cristóbal"],
+      "Comuna 4": ["La Boca", "Barracas", "Parque Patricios", "Nueva Pompeya"],
+      "Comuna 5": ["Almagro", "Boedo"],
+      "Comuna 6": ["Caballito"],
+      "Comuna 7": ["Flores", "Parque Chacabuco"],
+      "Comuna 8": ["Villa Soldati", "Villa Riachuelo", "Villa Lugano"],
+      "Comuna 9": ["Liniers", "Mataderos", "Parque Avellaneda"],
+      "Comuna 10": ["Villa Real", "Monte Castro", "Versailles", "Floresta", "Vélez Sarsfield"],
+      "Comuna 11": ["Villa General Mitre", "Villa Devoto", "Villa del Parque", "Villa Santa Rita"],
+      "Comuna 12": ["Coghlan", "Saavedra", "Villa Urquiza", "Villa Pueyrredón"],
+      "Comuna 13": ["Belgrano", "Núñez", "Colegiales"],
+      "Comuna 14": ["Palermo"],
+      "Comuna 15": ["Chacarita", "La Paternal", "Villa Crespo", "Villa Ortúzar", "Parque Chas"]
+    };
+
+    const culturaBarriosDef = {
+      "Vida de Tango": ["San Telmo", "La Boca"],
+      "Alma de Empresario": ["Monserrat", "Puerto Madero", "San Nicolás"],
+      "Carnicero Respetado": ["Mataderos", "Liniers"],
+      "Non entendo": ["Belgrano"],
+      "Abasto de mi vida": ["Balvanera", "Almagro"],
+      "Palermo Soho": ["Palermo"],
+      "La Isla Porteña": ["Recoleta"]
+    };
+
+    const listaLogros = [
+      { titulo: "Vida de Tango", desc: "Pasa por San Telmo y La Boca.", cat: "cultura", tipo: "general", icono: "🪗", progreso: 0 },
+      { titulo: "Alma de Empresario", desc: "Pasa por Monserrat, Puerto Madero o San Nicolás", cat: "cultura", tipo: "general", icono: "💼", progreso: 0 },
+      { titulo: "Carnicero Respetado", desc: "Pasa Mataderos o Liniers.", cat: "cultura", tipo: "general", icono: "🥩", progreso: 0 },
+      { titulo: "Non entendo", desc: "Pasa por el Barrio Chino.", cat: "cultura", tipo: "general", icono: "🥢", progreso: 0 },
+      { titulo: "Abasto de mi vida", desc: "Pasa por el Abasto y el pasaje Carlos Gardel.", cat: "cultura", tipo: "general", icono: "🎸", progreso: 0 },
+      { titulo: "Palermo Soho", desc: "Pasa por Plaza Serrano y Plaza Armenia.", cat: "cultura", tipo: "general", icono: "🍻", progreso: 0 },
+      { titulo: "La Isla Porteña", desc: "Pasa por la zona de \"La Isla\" en Recoleta.", cat: "cultura", tipo: "general", icono: "🏛️", progreso: 0 },
+
+      { 
+        titulo: "La remera de Greenpeace", 
+        desc: "Pasa por los Bosques de Palermo, Reserva Ecológica y Ecoparque.", 
+        cat: "lugares", tipo: "general", icono: "🌿", progreso: 0,
+        mode: "ALL_CHECKPOINTS",
+        targetCheckpoints: [
+          { nombre: "Bosques de Palermo", coords: [-58.4116, -34.5683], visitado: false },
+          { nombre: "Reserva Ecológica", coords: [-58.3580, -34.6110], visitado: false },
+          { nombre: "Ecoparque", coords: [-58.4180, -34.5790], visitado: false }
+        ]
+      },
+      { 
+        titulo: "Café con leche con medialunas", 
+        desc: "Pasa por el Café Tortoni, La Giralda o Confitería del Molino (al menos 1).", 
+        cat: "lugares", tipo: "general", icono: "☕", progreso: 0,
+        mode: "ANY_CHECKPOINT",
+        targetCheckpoints: [
+          { nombre: "Café Tortoni", coords: [-58.3792, -34.6086], visitado: false },
+          { nombre: "La Giralda", coords: [-58.3862, -34.6042], visitado: false },
+          { nombre: "Confitería del Molino", coords: [-58.3924, -34.6091], visitado: false }
+        ]
+      },
+      { 
+        titulo: "Pizza al paso", 
+        desc: "Pasa por Güerrin, Las Cuartetas o Banchero (al menos 1).", 
+        cat: "lugares", tipo: "general", icono: "🍕", progreso: 0,
+        mode: "ANY_CHECKPOINT",
+        targetCheckpoints: [
+          { nombre: "Güerrin", coords: [-58.3860, -34.6041], visitado: false },
+          { nombre: "Las Cuartetas", coords: [-58.3833, -34.6038], visitado: false },
+          { nombre: "Banchero (La Boca)", coords: [-58.3628, -34.6366], visitado: false }
+        ]
+      },
+      { titulo: "¿Y Dónde está el Presidente?", desc: "Pasa por la Plaza de Mayo y la Casa Rosada.", cat: "lugares", tipo: "general", icono: "🇦🇷", progreso: 0, targetCoords: [-58.3701, -34.6083] },
+      { 
+        titulo: "El palacio embrujado", 
+        desc: "Pasa por el Palacio Barolo o la Torre del Fantasma en La Boca (al menos 1).", 
+        cat: "lugares", tipo: "general", icono: "👻", progreso: 0,
+        mode: "ANY_CHECKPOINT",
+        targetCheckpoints: [
+          { nombre: "Palacio Barolo", coords: [-58.3860, -34.6095], visitado: false },
+          { nombre: "Torre del Fantasma", coords: [-58.3611, -34.6313], visitado: false }
+        ]
+      },
+      { titulo: "El templo del rock", desc: "Calle Estados Unidos 1234", cat: "lugares", tipo: "general", icono: "🎸", progreso: 0, targetCoords: [-58.3845, -34.6223] },
+      { titulo: "La ciudad de la furia", desc: "Av. Hipólito Yrigoyen y Av. Presidente Julio A. Roca", cat: "lugares", tipo: "general", icono: "⚡", progreso: 0, targetCoords: [-58.3765, -34.6085] },
+      { titulo: "RIP la mansión", desc: "Pasa por la mansión del trap", cat: "lugares", tipo: "general", icono: "🎤", progreso: 0, targetCoords: [-58.4391, -34.6053] },
+      { titulo: "BAJA CAGON, BAJA", desc: "Humboldt 2045", cat: "lugares", tipo: "general", icono: "🔥", progreso: 0, targetCoords: [-58.4320, -34.5804] },
+      { titulo: "La tragedia del 30 de diciembre", desc: "Pasa por el santuario de Cromañón (Ecuador y Bartolomé Mitre).", cat: "lugares", tipo: "general", icono: "🕯️", progreso: 0, targetCoords: [-58.4093, -34.6089] },
+      { 
+        titulo: "Buscando a la muerte", 
+        desc: "Pasa por cualquiera de los cementerios de capital (Recoleta, Chacarita o Flores).", 
+        cat: "lugares", tipo: "general", icono: "⚰️", progreso: 0,
+        mode: "ANY_CHECKPOINT",
+        targetCheckpoints: [
+          { nombre: "Cementerio Recoleta", coords: [-58.3931, -34.5873], visitado: false },
+          { nombre: "Cementerio Chacarita", coords: [-58.4590, -34.5880], visitado: false },
+          { nombre: "Cementerio Flores", coords: [-58.4630, -34.6430], visitado: false }
+        ]
+      },
+      { 
+        titulo: "Bienvenido fulbo señores", 
+        desc: "Pasa por todos los estadios de Primera División de la ciudad.", 
+        cat: "lugares", tipo: "general", icono: "⚽", progreso: 0,
+        mode: "ALL_CHECKPOINTS",
+        targetCheckpoints: [
+          { nombre: "River (Mâs Monumental)", coords: [-58.4497, -34.5453], visitado: false },
+          { nombre: "Boca (Alberto J. Armando 'La Bombonera')", coords: [-58.3647, -34.6356], visitado: false },
+          { nombre: "Vélez (José Amalfitani)", coords: [-58.5207, -34.6354], visitado: false },
+          { nombre: "Huracán (Tomás Adolfo Ducó 'El Palacio')", coords: [-58.3963, -34.6433], visitado: false },
+          { nombre: "San Lorenzo (Pedro Bidegain 'Nuevo Gasómetro')", coords: [-58.4401, -34.6520], visitado: false },
+          { nombre: "Argentinos Jrs. (Diego Armando Maradona)", coords: [-58.4726, -34.6063], visitado: false },
+          { nombre: "Barracas Central (Claudio Fabián Tapia)", coords: [-58.3962, -34.6480], visitado: false }
+        ]
+      },
+
+      { titulo: "De Turista en la Ciudad", desc: "Visitá 5 barrios porteños distintos en un solo día.", cat: "movimiento", tipo: "general", icono: "📸", progreso: 0 },
+      { titulo: "Conocedor de Comunas", desc: "Pasa por al menos un barrio en cada una de las 15 Comunas de CABA.", cat: "movimiento", tipo: "general", icono: "🗺️", progreso: 0 },
+      { 
+        titulo: "Cruzando los Rieles", 
+        desc: "Pasa por las grandes terminales de tren: Retiro, Constitución y Once.", 
+        cat: "movimiento", tipo: "general", icono: "🚆", progreso: 0,
+        mode: "ALL_CHECKPOINTS",
+        targetCheckpoints: [
+          { nombre: "Terminal Retiro", coords: [-58.3750, -34.5910], visitado: false },
+          { nombre: "Terminal Constitución", coords: [-58.3810, -34.6270], visitado: false },
+          { nombre: "Terminal Once", coords: [-58.4060, -34.6090], visitado: false }
+        ]
+      },
+      { 
+        titulo: "Recuerdos del Río", 
+        desc: "Caminá desde el Puente de la Mujer hasta la Facultad de Derecho.", 
+        cat: "movimiento", tipo: "general", icono: "🌊", progreso: 0,
+        mode: "LINE_TRAIL",
+        distanciaAcumuladaMts: 0,
+        distanciaTotalObjetivoMts: 2800,
+        puntosAnteriores: [],
+        routeLine: [[-58.3648, -34.6083], [-58.3750, -34.5910], [-58.3925, -34.5830]]
+      },
+      { 
+        titulo: "La Diagonal Porteña", 
+        desc: "Caminá de punta a punta por la Av. Diagonal Norte.", 
+        cat: "movimiento", tipo: "general", icono: "📐", progreso: 0,
+        mode: "LINE_TRAIL",
+        distanciaAcumuladaMts: 0,
+        distanciaTotalObjetivoMts: 900,
+        puntosAnteriores: [],
+        routeLine: [[-58.3725, -34.6083], [-58.3800, -34.6050], [-58.3833, -34.6033]]
+      },
+      { 
+        titulo: "Pateando el Bajo", 
+        desc: "Caminá a lo largo de Av. Paseo Colón y Av. Leandro N. Alem.", 
+        cat: "movimiento", tipo: "general", icono: "🚶", progreso: 0,
+        mode: "LINE_TRAIL",
+        distanciaAcumuladaMts: 0,
+        distanciaTotalObjetivoMts: 2200,
+        puntosAnteriores: [],
+        routeLine: [[-58.3710, -34.5920], [-58.3700, -34.6070], [-58.3680, -34.6220]]
+      },
+      { 
+        titulo: "El Subte por arriba", 
+        desc: "Pasa por encima del trazado de todas las líneas de Subte (A, B, C, D, E y H).", 
+        cat: "movimiento", tipo: "general", icono: "🚇", progreso: 0,
+        mode: "ALL_CHECKPOINTS",
+        targetCheckpoints: [
+          { nombre: "Línea A", coords: [-58.4200, -34.6100], visitado: false },
+          { nombre: "Línea B", coords: [-58.4300, -34.6000], visitado: false },
+          { nombre: "Línea C", coords: [-58.3800, -34.6100], visitado: false },
+          { nombre: "Línea D", coords: [-58.4200, -34.5800], visitado: false },
+          { nombre: "Línea E", coords: [-58.4100, -34.6200], visitado: false },
+          { nombre: "Línea H", coords: [-58.4000, -34.6100], visitado: false }
+        ]
+      },
+      { 
+        titulo: "La avenida que no duerme", 
+        desc: "Caminá por Av. Corrientes desde el Obelisco hasta Av. Callao.", 
+        cat: "movimiento", tipo: "general", icono: "🎭", progreso: 0,
+        mode: "LINE_TRAIL",
+        distanciaAcumuladaMts: 0,
+        distanciaTotalObjetivoMts: 1100,
+        puntosAnteriores: [],
+        routeLine: [[-58.3816, -34.6037], [-58.3860, -34.6041], [-58.3922, -34.6044]]
+      },
+      { titulo: "El Rey de la Comuna", desc: "Desbloqueá más del 80% de una misma comuna.", cat: "movimiento", tipo: "general", icono: "👑", progreso: 0 },
+
+      { titulo: "Comuna 1", desc: "pasa por todos los barrios de comuna 1", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 1" },
+      { titulo: "Comuna 2", desc: "pasa por todos los barrios de comuna 2", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 2" },
+      { titulo: "Comuna 3", desc: "pasa por todos los barrios de comuna 3", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 3" },
+      { titulo: "Comuna 4", desc: "pasa por todos los barrios de comuna 4", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 4" },
+      { titulo: "Comuna 5", desc: "pasa por todos los barrios de comuna 5", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 5" },
+      { titulo: "Comuna 6", desc: "pasa por todos los barrios de comuna 6", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 6" },
+      { titulo: "Comuna 7", desc: "pasa por todos los barrios de comuna 7", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 7" },
+      { titulo: "Comuna 8", desc: "pasa por todos los barrios de comuna 8", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 8" },
+      { titulo: "Comuna 9", desc: "pasa por todos los barrios de comuna 9", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 9" },
+      { titulo: "Comuna 10", desc: "pasa por todos los barrios de comuna 10", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 10" },
+      { titulo: "Comuna 11", desc: "pasa por todos los barrios de comuna 11", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 11" },
+      { titulo: "Comuna 12", desc: "pasa por todos los barrios de comuna 12", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 12" },
+      { titulo: "Comuna 13", desc: "pasa por todos los barrios de comuna 13", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 13" },
+      { titulo: "Comuna 14", desc: "pasa por todos los barrios de comuna 14", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 14" },
+      { titulo: "Comuna 15", desc: "pasa por todos los barrios de comuna 15", cat: "comunas", tipo: "comunas", icono: "🏙️", progreso: 0, comunaKey: "Comuna 15" }
+    ];
+
+    // --- LOCALSTORAGE PERSISTENCIA ---
+    function guardarProgreso() {
+      try {
+        if (exploredPolygon) {
+          localStorage.setItem('fog_explored_polygon', JSON.stringify(exploredPolygon));
+        }
+        localStorage.setItem('fog_barrios_data', JSON.stringify(barriosCABA.map(b => ({ n: b.nombre, p: b.porcentaje }))));
+        const logrosGuardar = listaLogros.map(l => ({
+          t: l.titulo,
+          p: l.progreso,
+          cp: l.targetCheckpoints ? l.targetCheckpoints.map(cp => cp.visitado) : null
+        }));
+        localStorage.setItem('fog_logros_data', JSON.stringify(logrosGuardar));
+      } catch(e) { console.error("Error guardando progreso:", e); }
+    }
+
+    function cargarProgreso() {
+      try {
+        const polySaved = localStorage.getItem('fog_explored_polygon');
+        if (polySaved) exploredPolygon = JSON.parse(polySaved);
+
+        const barriosSaved = localStorage.getItem('fog_barrios_data');
+        if (barriosSaved) {
+          const parsedBarrios = JSON.parse(barriosSaved);
+          parsedBarrios.forEach(sb => {
+            const b = barriosCABA.find(item => item.nombre === sb.n);
+            if (b) b.porcentaje = sb.p;
+          });
+        }
+
+        const logrosSaved = localStorage.getItem('fog_logros_data');
+        if (logrosSaved) {
+          const parsedLogros = JSON.parse(logrosSaved);
+          parsedLogros.forEach(sl => {
+            const l = listaLogros.find(item => item.titulo === sl.t);
+            if (l) {
+              l.progreso = sl.p;
+              if (l.targetCheckpoints && sl.cp) {
+                sl.cp.forEach((vis, idx) => {
+                  if (l.targetCheckpoints[idx]) l.targetCheckpoints[idx].visitado = vis;
+                });
+              }
+            }
+          });
+        }
+      } catch(e) { console.error("Error cargando progreso:", e); }
+    }
+
+    // --- BANNER TOAST ---
+    function mostrarToastLogro(titulo) {
+      const toast = document.getElementById('toast-notification');
+      document.getElementById('toast-text').innerText = titulo;
+      toast.classList.add('active');
+      if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
+      setTimeout(() => { toast.classList.remove('active'); }, 3500);
+    }
+
+    function renderizarBarrios(filtro = "") {
+      const container = document.getElementById('lista-barrios-container');
+      container.innerHTML = "";
+      let visitadosCount = 0;
+
+      barriosCABA.forEach(barrio => {
+        if (barrio.porcentaje > 0) visitadosCount++;
+
+        if (barrio.nombre.toLowerCase().includes(filtro.toLowerCase())) {
+          const isUnlocked = barrio.porcentaje > 0;
+          let formattedPct = barrio.porcentaje < 1 ? barrio.porcentaje.toFixed(1) : Math.round(barrio.porcentaje);
+          
+          container.innerHTML += `
+            <div class="item-card">
+              <div class="card-icon ${isUnlocked ? 'unlocked' : ''}">📍</div>
+              <div class="card-info">
+                <div class="card-title">${barrio.nombre}</div>
+                <div class="card-desc">${formattedPct}% explorado del barrio</div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" style="width: ${barrio.porcentaje}%;"></div>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+      });
+      document.getElementById('stat-barrios-visitados').innerText = `${visitadosCount} / 48`;
+    }
+
+    function filtrarBarrios() {
+      renderizarBarrios(document.getElementById('input-buscar-barrio').value);
+    }
+
+    function renderizarLogros() {
+      const container = document.getElementById('lista-logros-container');
+      container.innerHTML = "";
+      const textoBusqueda = document.getElementById('input-buscar-logro').value.toLowerCase();
+      
+      let completadosCount = 0;
+      let totalXp = 0;
+
+      listaLogros.forEach(logro => {
+        const estaCompletado = (logro.progreso >= 100);
+        if (estaCompletado) {
+          completadosCount++;
+          totalXp += 50;
+        }
+
+        let pasaFiltroVista = false;
+        if (vistaActualLogros === 'completados') {
+          pasaFiltroVista = estaCompletado;
+        } else if (vistaActualLogros === 'comunas') {
+          pasaFiltroVista = (logro.tipo === 'comunas' && !estaCompletado);
+        } else {
+          pasaFiltroVista = (logro.tipo === 'general' && !estaCompletado);
+        }
+
+        const coincideCategoria = (vistaActualLogros === 'completados' || vistaActualLogros === 'comunas' || categoriaActiva === 'todos' || logro.cat === categoriaActiva);
+        const coincideBusqueda = logro.titulo.toLowerCase().includes(textoBusqueda) || logro.desc.toLowerCase().includes(textoBusqueda);
+
+        if (pasaFiltroVista && coincideCategoria && coincideBusqueda) {
+          const isUnlocked = logro.progreso > 0;
+          container.innerHTML += `
+            <div class="item-card">
+              <div class="card-icon ${isUnlocked ? 'unlocked' : ''}">${logro.icono}</div>
+              <div class="card-info">
+                <div class="card-title">${logro.titulo}</div>
+                <div class="card-desc">${logro.desc}</div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" style="width: ${logro.progreso}%;"></div>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+      });
+
+      document.getElementById('stat-logros-completados').innerText = `${completadosCount} / ${listaLogros.length}`;
+      document.getElementById('stat-total-xp').innerText = `${totalXp} XP`;
+    }
+
+    function cambiarVistaLogros(vista) {
+      vistaActualLogros = vista;
+      document.getElementById('tab-general').classList.remove('active');
+      document.getElementById('tab-comunas').classList.remove('active');
+      document.getElementById('tab-completados').classList.remove('active');
+      
+      const chipsContainer = document.getElementById('filtro-chips-container');
+
+      if (vista === 'general') {
+        document.getElementById('tab-general').classList.add('active');
+        chipsContainer.style.display = 'flex';
+      } else if (vista === 'comunas') {
+        document.getElementById('tab-comunas').classList.add('active');
+        chipsContainer.style.display = 'none';
+      } else {
+        document.getElementById('tab-completados').classList.add('active');
+        chipsContainer.style.display = 'flex';
+      }
+      renderizarLogros();
+    }
+
+    function filtrarCategoria(cat, elemento) {
+      categoriaActiva = cat;
+      document.querySelectorAll('.filter-chips .chip').forEach(c => c.classList.remove('active'));
+      elemento.classList.add('active');
+      renderizarLogros();
+    }
+
+    function verificarLogros(lng, lat) {
+      const userPoint = [lng, lat];
+
+      listaLogros.forEach(logro => {
+        const estabaCompletado = logro.progreso >= 100;
+
+        // 1. Lugares puntuales GPS (Radio de 50m)
+        if (logro.targetCoords) {
+          const distanciaMts = turf.distance(userPoint, logro.targetCoords, { units: 'meters' });
+          if (distanciaMts <= 50) {
+            logro.progreso = 100;
+          }
+        }
+
+        // 2. Checkpoints Múltiples (Radio de 50m)
+        if (logro.targetCheckpoints) {
+          logro.targetCheckpoints.forEach(cp => {
+            const dist = turf.distance(userPoint, cp.coords, { units: 'meters' });
+            if (dist <= 50) {
+              cp.visitado = true;
+            }
+          });
+
+          const visitados = logro.targetCheckpoints.filter(cp => cp.visitado).length;
+          if (logro.mode === "ANY_CHECKPOINT") {
+            logro.progreso = visitados > 0 ? 100 : 0;
+          } else if (logro.mode === "ALL_CHECKPOINTS") {
+            logro.progreso = (visitados / logro.targetCheckpoints.length) * 100;
+          }
+        }
+
+        // 3. Trazas Continuas (Buffer de 50m)
+        if (logro.mode === "LINE_TRAIL" && logro.routeLine) {
+          const line = turf.lineString(logro.routeLine);
+          const bufferCorredor = turf.buffer(line, 50, { units: 'meters' });
+          
+          if (turf.booleanPointInPolygon(userPoint, bufferCorredor)) {
+            const puntoFinal = logro.routeLine[logro.routeLine.length - 1];
+            const distAlFinal = turf.distance(userPoint, puntoFinal, { units: 'meters' });
+            
+            if (distAlFinal <= 50) {
+              logro.progreso = 100;
+            } else {
+              if (logro.puntosAnteriores.length > 0) {
+                const ultimoPunto = logro.puntosAnteriores[logro.puntosAnteriores.length - 1];
+                const distTramo = turf.distance(ultimoPunto, userPoint, { units: 'meters' });
+                
+                if (distTramo >= 5) {
+                  logro.distanciaAcumuladaMts += distTramo;
+                  logro.puntosAnteriores.push(userPoint);
+                }
+              } else {
+                logro.puntosAnteriores.push(userPoint);
+              }
+
+              let pctLine = (logro.distanciaAcumuladaMts / logro.distanciaTotalObjetivoMts) * 100;
+              logro.progreso = Math.min(100, Math.max(logro.progreso, pctLine));
+            }
+          }
+        }
+
+        // 4. Cultura & Barrios
+        if (culturaBarriosDef[logro.titulo]) {
+          const nombresBarrios = culturaBarriosDef[logro.titulo];
+          const barriosReq = barriosCABA.filter(b => nombresBarrios.includes(b.nombre));
+          
+          if (barriosReq.length > 0) {
+            const visitadosCount = barriosReq.filter(b => b.porcentaje > 0).length;
+            logro.progreso = (visitadosCount === barriosReq.length) ? 100 : (visitadosCount / barriosReq.length) * 100;
+          }
+        }
+
+        // 5. Comunas (1-15)
+        if (logro.comunaKey && comunasDef[logro.comunaKey]) {
+          const nombresBarriosComuna = comunasDef[logro.comunaKey];
+          const barriosDeComuna = barriosCABA.filter(b => nombresBarriosComuna.includes(b.nombre));
+          
+          if (barriosDeComuna.length > 0) {
+            const visitadosCount = barriosDeComuna.filter(b => b.porcentaje > 0).length;
+            logro.progreso = (visitadosCount === barriosDeComuna.length) ? 100 : (visitadosCount / barriosDeComuna.length) * 100;
+          }
+        }
+
+        // 6. Desafíos Generales
+        if (logro.titulo === "De Turista en la Ciudad") {
+          let visitados = barriosCABA.filter(b => b.porcentaje > 0).length;
+          logro.progreso = Math.min(100, (visitados / 5) * 100);
+        }
+        
+        if (logro.titulo === "Conocedor de Comunas") {
+          let comunasConAlgo = 0;
+          Object.keys(comunasDef).forEach(comKey => {
+            const bComuna = barriosCABA.filter(b => comunasDef[comKey].includes(b.nombre));
+            if (bComuna.some(b => b.porcentaje > 0)) comunasConAlgo++;
+          });
+          logro.progreso = Math.min(100, (comunasConAlgo / 15) * 100);
+        }
+
+        if (logro.titulo === "El Rey de la Comuna") {
+          let maxComunaPct = 0;
+          Object.keys(comunasDef).forEach(comKey => {
+            const bComuna = barriosCABA.filter(b => comunasDef[comKey].includes(b.nombre));
+            if (bComuna.length > 0) {
+              let suma = 0;
+              bComuna.forEach(b => suma += b.porcentaje);
+              let prom = suma / bComuna.length;
+              if (prom > maxComunaPct) maxComunaPct = prom;
+            }
+          });
+          logro.progreso = maxComunaPct >= 80 ? 100 : (maxComunaPct / 80) * 100;
+        }
+
+        // Disparar Banner Toast al completarse por primera vez
+        if (!estabaCompletado && logro.progreso >= 100) {
+          mostrarToastLogro(logro.titulo);
+        }
+      });
+
+      renderizarLogros();
+      guardarProgreso();
+    }
+
+    function calcularCoberturaBarrios(lng, lat) {
+      barriosCABA.forEach(barrio => {
+        const distanciaCentroMts = turf.distance([lng, lat], barrio.coords, { units: 'meters' });
+        if (distanciaCentroMts < 1800) {
+          let areaAporteM2 = Math.PI * Math.pow(RADIUS_METERS, 2) * 0.15;
+          let nuevoProgreso = barrio.porcentaje + (areaAporteM2 / barrio.areaM2Total) * 100;
+          barrio.porcentaje = Math.min(100, nuevoProgreso);
+        }
+      });
+      renderizarBarrios(document.getElementById('input-buscar-barrio').value);
+      verificarLogros(lng, lat);
+    }
+
+    function abrirBarrios() {
+      document.getElementById('barrios-screen').classList.add('active');
+    }
+    function cerrarBarrios() {
+      document.getElementById('barrios-screen').classList.remove('active');
+    }
+
+    function cambiarPestana(pestana) {
+      const items = document.querySelectorAll('.nav-item');
+      items.forEach(el => el.classList.remove('active'));
+      
+      const logrosScreen = document.getElementById('logros-screen');
+      cerrarBarrios();
+
+      if (pestana === 'logros') {
+        items[2].classList.add('active');
+        logrosScreen.classList.add('active');
+      } else if (pestana === 'amigos') {
+        items[0].classList.add('active');
+        logrosScreen.classList.remove('active');
+      } else {
+        items[1].classList.add('active');
+        logrosScreen.classList.remove('active');
+      }
+    }
+
+    function updateExploration(lng, lat) {
+      const currentPoint = [lng, lat];
+      lastUserCoords = currentPoint;
+      
+      const newCircle = turf.circle(currentPoint, RADIUS_METERS, { steps: 32, units: 'meters' });
+
+      if (!exploredPolygon) {
+        exploredPolygon = newCircle;
+      } else {
+        try {
+          const unionResult = turf.union(exploredPolygon, newCircle);
+          if (unionResult) {
+            exploredPolygon = unionResult;
+          }
+        } catch (e) {
+          console.error("Error en union turf:", e);
+        }
+      }
+
+      try {
+        let totalAreaM2 = turf.area(exploredPolygon);
+        let percentage = (totalAreaM2 / TARGET_AREA_M2) * 100;
+        if (percentage > 100) percentage = 100;
+        
+        let formattedPercent = percentage < 1 ? percentage.toFixed(2) : percentage.toFixed(1);
+        document.getElementById('explore-text').innerText = `explorado ${formattedPercent}%`;
+        document.getElementById('stat-total-percent').innerText = `${formattedPercent}%`;
+      } catch (e) {
+        console.error("Error calculando área:", e);
+      }
+
+      calcularCoberturaBarrios(lng, lat);
+
+      const fogFeature = {
+        type: 'Feature',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [[-180, 85], [180, 85], [180, -85], [-180, -85], [-180, 85]],
+            ...(exploredPolygon.geometry.type === 'Polygon' ? [exploredPolygon.geometry.coordinates[0]] : exploredPolygon.geometry.coordinates.map(p => p[0]))
+          ]
+        }
+      };
+
+      if (map.getSource(FOG_SOURCE_ID)) {
+        map.getSource(FOG_SOURCE_ID).setData(fogFeature);
+      } else {
+        map.addSource(FOG_SOURCE_ID, { type: 'geojson', data: fogFeature });
+        map.addLayer({
+          id: FOG_LAYER_ID,
+          type: 'fill',
+          source: FOG_SOURCE_ID,
+          paint: {
+            'fill-color': '#000000',
+            'fill-opacity': 0.95,
+            'fill-antialias': true
+          }
+        });
+      }
+
+      const lngLat = { lng, lat };
+      if (!userMarker) {
+        userMarker = new mapboxgl.Marker({ color: '#FF3366' })
+          .setLngLat(lngLat)
+          .addTo(map);
+      } else {
+        userMarker.setLngLat(lngLat);
+      }
+    }
+
+    function centrarEnUsuario() {
+      if (lastUserCoords) {
+        map.easeTo({ center: lastUserCoords, zoom: 16, duration: 800 });
+      }
+    }
+
+    map.on('load', () => {
+      cargarProgreso();
+      renderizarBarrios();
+      renderizarLogros();
+
+      if (lastUserCoords) {
+        updateExploration(lastUserCoords[0], lastUserCoords[1]);
+      } else {
+        updateExploration(-58.3816, -34.6037);
+      }
+
+      if ("geolocation" in navigator) {
+        navigator.geolocation.watchPosition(
+          (position) => {
+            const lng = position.coords.longitude;
+            const lat = position.coords.latitude;
+            updateExploration(lng, lat);
+          },
+          (error) => {
+            console.warn("GPS no disponible, modo prueba por clics activo:", error.message);
+          },
+          { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
+        );
+      }
+
+      // Permite simular movimiento haciendo clic en el mapa si estás testeando en compu
+      map.on('click', (e) => {
+        const { lng, lat } = e.lngLat;
+        updateExploration(lng, lat);
+        map.easeTo({ center: [lng, lat], duration: 600 });
+      });
+    });
+  </script>
+</body>
+</html>
